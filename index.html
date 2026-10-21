@@ -45,6 +45,9 @@
   .search input { flex: 1; min-width: 0; border: 0; background: none; outline: none; font: inherit; font-size: 15px; color: var(--text); }
   .search button { border: 0; background: none; color: var(--muted); font-size: 14px; letter-spacing: .08em; padding: 0; }
   .search button:hover { color: var(--text); }
+  .search .clear { flex: none; width: 22px; height: 22px; border-radius: 50%; font-size: 16px; line-height: 1; letter-spacing: 0; }
+  .search .clear:hover { background: rgba(0,0,0,.06); }
+  .search input::-webkit-search-cancel-button { display: none; }
   .cats { flex: 1; min-width: 260px; display: grid; grid-template-columns: repeat(auto-fill, minmax(92px, 1fr)); gap: 8px 12px; }
   .cats button { height: 23px; padding: 0 6px; border: 1px solid var(--line); background: transparent; color: var(--muted); font-size: 11.5px; letter-spacing: .04em; white-space: nowrap; }
   .cats button:hover { color: var(--text); border-color: var(--muted); }
@@ -131,6 +134,7 @@
       <form class="search" id="searchForm">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg>
         <input id="q" placeholder="상품명을 입력하세요" required aria-label="상품 검색">
+        <button type="button" class="clear" id="qClear" aria-label="검색어 지우기" hidden>✕</button>
         <button>Search</button>
       </form>
       <div class="cats" id="cats"></div>
@@ -406,7 +410,7 @@ function renderCats() {
     b.type = 'button';
     b.textContent = c;
     b.classList.toggle('on', state.q === c);
-    b.onclick = () => { $('q').value = c; runSearch(c); };
+    b.onclick = () => { $('q').value = c; $('qClear').hidden = false; runSearch(c); };
     $('cats').appendChild(b);
   }
 }
@@ -671,6 +675,8 @@ function floor(n) {
   return v < 0 ? `지하 ${-v}층` : `${v}층`;
 }
 
+$('q').oninput = () => { $('qClear').hidden = !$('q').value; };
+$('qClear').onclick = () => { $('q').value = ''; $('qClear').hidden = true; $('q').focus(); };
 $('searchForm').onsubmit = (e) => { e.preventDefault(); runSearch($('q').value.trim()); };
 $('more').onclick = () => search(state.page + 1);
 
