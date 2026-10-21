@@ -110,6 +110,8 @@
   .ov-row .pname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .ov-row .loc { margin-top: 2px; font-size: 12px; }
   .loc:empty { display: none; }
+  .dist { margin-left: auto; padding-left: 8px; font-size: 12px; font-weight: 500; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .group { margin-top: 14px; padding: 6px 0; font-size: 11.5px; font-weight: 700; letter-spacing: .06em; color: var(--muted); }
 </style>
 </head>
 <body>
@@ -127,15 +129,20 @@
       <div class="cats" id="cats"></div>
     </div>
 
+    <button type="button" class="section-title toggle" id="resultsToggle" aria-expanded="true" aria-controls="resultsBody" hidden>
+      <span class="label"><svg class="chev" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>Results</span>
+      <span id="status"></span>
+    </button>
+    <div id="resultsBody">
+      <div class="grid" id="results"></div>
+      <button class="more" id="more" hidden>MORE</button>
+    </div>
+
     <button type="button" class="section-title toggle" id="favToggle" aria-expanded="true" aria-controls="favProducts">
       <span class="label"><svg class="chev" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>★ Favorites</span>
       <span id="favCount"></span>
     </button>
     <div class="grid" id="favProducts"></div>
-
-    <div class="section-title" id="resultsTitle" hidden>Results <span id="status"></span></div>
-    <div class="grid" id="results"></div>
-    <button class="more" id="more" hidden>MORE</button>
   </section>
 
   <!-- 오른쪽: 매장별 재고 현황 -->
@@ -144,7 +151,7 @@
     <h2 id="pName">즐겨찾기 재고 현황</h2>
     <div class="summary" id="pInfo"></div>
     <form id="storeForm">
-      <input id="store" placeholder="지역·매장명 (예: 강남역, 수원)">
+      <input id="store" placeholder="지역·매장명 (비우면 내 주변 매장)">
       <button>재고 확인</button>
     </form>
     <div class="favs" id="favs"></div>
@@ -217,23 +224,58 @@ async function callTool(name, args) {
 
 const mcp = {
   search: (query, page) => callTool('search_products', { service: 'daiso', query, page, pageSize: 12 }),
-  inventory: (productId, store) =>
-    callTool('check_inventory', { service: 'daiso', operation: 'by_id', productId, storeQuery: store || undefined, pageSize: 20 }),
+  // coords를 주면 매장까지 거리가 내 위치 기준으로 계산됨
+  inventory: (productId, store, coords) =>
+    callTool('check_inventory', {
+      service: 'daiso', operation: 'by_id', productId, storeQuery: store || undefined, pageSize: 30,
+      latitude: coords?.lat, longitude: coords?.lng,
+    }),
   location: (productId, storeCode) =>
     callTool('get_product_details', { service: 'daiso', operation: 'display_location', productId, storeCode }),
 };
 
 // 같은 상품·매장 조합은 1분간 캐시
 const invCache = new Map();
-function fetchInventory(id, store) {
-  const key = id + '|' + store;
+function fetchInventory(id, store, coords) {
+  const key = id + '|' + store + '|' + (coords ? coords.lat.toFixed(3) + ',' + coords.lng.toFixed(3) : '');
   const hit = invCache.get(key);
   if (hit && Date.now() - hit.t < 60000) return hit.p;
-  const p = mcp.inventory(id, store);
+  const p = mcp.inventory(id, store, coords);
   invCache.set(key, { t: Date.now(), p });
   p.catch(() => invCache.delete(key));
   return p;
 }
+
+// ── 현재 위치: 브라우저 좌표 → 구 이름 (BigDataCloud 무료 역지오코딩) ──
+// 다이소 매장 검색은 좌표 검색을 지원하지 않으므로, 구 이름으로 검색한 뒤 거리순으로 정렬한다.
+let herePromise = null;
+let here = null; // 확인된 현재 위치 { lat, lng, areas, label }
+function getHere() {
+  herePromise ??= new Promise((resolve, reject) => {
+    if (!navigator.geolocation) return reject(new Error('이 브라우저는 위치 기능을 지원하지 않아요'));
+    navigator.geolocation.getCurrentPosition(
+      (pos) => resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
+      (err) => reject(new Error(err.code === 1 ? '위치 권한이 꺼져 있어요' : '현재 위치를 가져오지 못했어요')),
+      { timeout: 10000, maximumAge: 600000 },
+    );
+  }).then(async (c) => {
+    const res = await fetch(`https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${c.lat}&longitude=${c.lng}&localityLanguage=ko`);
+    const geo = await res.json();
+    // 시·군·구 경계 근처면 구가 2개 나올 수 있어 최대 2개까지 사용
+    const admin = geo.localityInfo?.administrative || [];
+    let areas = [...new Set(admin.filter((a) => a.adminLevel >= 6 && /[구군]$/.test(a.name)).map((a) => a.name))].slice(0, 2);
+    const city = admin.find((a) => a.adminLevel >= 5 && /시$/.test(a.name))?.name; // 예: 수원시 (서울은 없음)
+    if (!areas.length && city) areas = [city];
+    if (!areas.length) throw new Error('현재 위치의 지역 이름을 찾지 못했어요');
+    const top = city && !areas.includes(city) ? city : geo.principalSubdivision;
+    here = { ...c, areas, label: [top, areas.join('·')].filter(Boolean).join(' ') };
+    return here;
+  }).catch((e) => { herePromise = null; throw e; });
+  return herePromise;
+}
+
+const NEAR_MAX_KM = 15; // 같은 이름의 다른 지역 구(예: 중구)를 걸러내기 위한 거리 제한
+const NEAR_LIMIT = 10;
 
 // 진열 위치도 상품·매장 조합별로 캐시 (자주 바뀌지 않으므로 10분)
 const locCache = new Map();
@@ -366,7 +408,8 @@ function runSearch(q) {
 }
 
 async function search(page) {
-  $('resultsTitle').hidden = false;
+  $('resultsToggle').hidden = false;
+  if (page === 1) setResultsFolded(false, false); // 새로 검색하면 결과를 펼쳐서 보여줌
   $('status').textContent = '검색 중…';
   $('more').hidden = true;
   if (page === 1) $('results').innerHTML = '';
@@ -400,48 +443,81 @@ async function showProductInventory() {
   $('backBtn').onclick = () => { state.product = null; $('store').value = ''; markActive(); showOverview(); };
   $('stores').innerHTML = '';
 
-  // 검색어가 없으면 즐겨찾기 매장 기준으로 자동 조회
-  const targets = query ? [query] : favs;
-  if (!targets.length) {
-    $('invStatus').textContent = '지역·매장명을 입력하거나 매장을 즐겨찾기에 등록하세요.';
+  // 검색어가 없으면 즐겨찾기 매장 + 현재 위치 주변 매장을 자동 조회
+  let hereErr = null;
+  if (!query) {
+    $('invStatus').textContent = '현재 위치 확인 중…';
+    try { await getHere(); } catch (e) { hereErr = e.message; }
+    if (seq !== renderSeq) return;
+  }
+  const coords = here && { lat: here.lat, lng: here.lng };
+  const jobs = query
+    ? [{ q: query, kind: 'query' }]
+    : [...favs.map((q) => ({ q, kind: 'fav' })), ...(here ? here.areas.map((q) => ({ q, kind: 'near' })) : [])];
+  if (!jobs.length) {
+    $('invStatus').textContent = `${hereErr ? hereErr + '. ' : ''}지역·매장명을 입력하거나 매장을 즐겨찾기에 등록하세요.`;
     return;
   }
-  $('invStatus').textContent = query ? '매장 재고 조회 중…' : '즐겨찾기 매장 재고 조회 중…';
+  $('invStatus').textContent = query ? '매장 재고 조회 중…' : `${here ? `📍 ${here.label} 주변` : '즐겨찾기'} 매장 재고 조회 중…`;
 
-  const results = await Promise.allSettled(targets.map((t) => fetchInventory(p.id, t)));
+  const results = await Promise.allSettled(jobs.map((j) => fetchInventory(p.id, j.q, coords)));
   if (seq !== renderSeq) return;
 
-  let stores = [];
+  const groups = { query: [], fav: [], near: [] };
   let online = null;
   results.forEach((r, i) => {
     if (r.status !== 'fulfilled') return;
     online = r.value.onlineStock ?? online;
     const list = r.value.storeInventory?.stores || [];
-    // 즐겨찾기 조회는 이름이 정확히 일치하는 매장만
-    stores.push(...(query ? list : list.filter((s) => s.storeName === targets[i]).slice(0, 1)));
+    const { q, kind } = jobs[i];
+    // 즐겨찾기는 이름이 정확히 일치하는 매장만, 주변 매장은 가까운 곳만
+    if (kind === 'fav') groups.fav.push(...list.filter((s) => s.storeName === q).slice(0, 1));
+    else if (kind === 'near') groups.near.push(...list.filter((s) => Number(s.distance) <= NEAR_MAX_KM));
+    else groups.query.push(...list);
   });
-  stores = stores.filter((s, i) => stores.findIndex((o) => o.storeCode === s.storeCode) === i);
+  const byDistance = (a, b) => Number(a.distance) - Number(b.distance);
+  const seen = new Set();
+  const uniq = (list) => list.filter((s) => !seen.has(s.storeCode) && seen.add(s.storeCode));
+  const sections = query
+    ? [{ title: null, list: uniq(coords ? groups.query.sort(byDistance) : groups.query) }]
+    : [
+        { title: '즐겨찾기 매장', list: uniq(groups.fav) },
+        { title: here ? `내 주변 매장 · ${here.areas.join('·')}` : null, list: uniq(groups.near.sort(byDistance)).slice(0, NEAR_LIMIT) },
+      ];
+  const stores = sections.flatMap((s) => s.list);
 
   const failed = results.filter((r) => r.status === 'rejected').length;
   const inStock = stores.filter((s) => s.quantity > 0).length;
+  const scope = query ? `'${query}'` : here ? `📍 ${here.label} 기준` : '즐겨찾기';
   $('invStatus').textContent = stores.length
-    ? `${query ? `'${query}'` : '즐겨찾기'} 매장 ${stores.length}곳 중 재고 있음 ${inStock}곳 · 온라인 재고 ${online ?? '-'}개${failed ? ` (조회 실패 ${failed}건)` : ''}`
+    ? `${scope} 매장 ${stores.length}곳 중 재고 있음 ${inStock}곳 · 온라인 재고 ${online ?? '-'}개${failed ? ` (조회 실패 ${failed}건)` : ''}${hereErr ? ` · ${hereErr}(즐겨찾기만 표시)` : ''}`
     : failed ? '재고 조회에 실패했습니다. 잠시 후 다시 시도해 주세요.' : '해당 지역에서 매장을 찾지 못했습니다.';
 
-  for (const s of stores) {
-    const has = s.quantity > 0;
-    const row = document.createElement('div');
-    row.className = 'store';
-    row.innerHTML = `<div class="qty ${has ? 'ok' : 'no'}">${s.quantity == null ? '확인불가' : has ? s.quantity + '개' : '재고없음'}</div>
-      <div class="info"><div class="sname">${esc(s.storeName)}<button type="button" class="star" title="즐겨찾기" data-name="${esc(s.storeName)}"></button></div>
-        <div class="addr">${esc(s.address)} · ${esc(s.openTime)}~${esc(s.closeTime)}${s.options?.parking ? ' · 주차' : ''}</div>
-        <div class="loc"></div></div>`;
-    row.querySelector('.star').onclick = () => toggleFav(s.storeName);
-    // 재고가 있는 매장은 진열 위치를 자동으로 조회
-    if (has) fillLocation(p.id, s.storeCode, row.querySelector('.loc'), () => seq === renderSeq);
-    $('stores').appendChild(row);
+  for (const sec of sections) {
+    if (!sec.list.length) continue;
+    if (sec.title && sections.filter((x) => x.list.length).length > 1) {
+      const h = document.createElement('div');
+      h.className = 'group';
+      h.textContent = sec.title;
+      $('stores').appendChild(h);
+    }
+    for (const s of sec.list) renderStoreRow(s, p, seq, !!coords);
   }
   syncStars();
+}
+
+function renderStoreRow(s, p, seq, showDistance) {
+  const has = s.quantity > 0;
+  const row = document.createElement('div');
+  row.className = 'store';
+  row.innerHTML = `<div class="qty ${has ? 'ok' : 'no'}">${s.quantity == null ? '확인불가' : has ? s.quantity + '개' : '재고없음'}</div>
+    <div class="info"><div class="sname">${esc(s.storeName)}<button type="button" class="star" title="즐겨찾기" data-name="${esc(s.storeName)}"></button>${showDistance && s.distance != null ? `<span class="dist">${esc(s.distance)}km</span>` : ''}</div>
+      <div class="addr">${esc(s.address)} · ${esc(s.openTime)}~${esc(s.closeTime)}${s.options?.parking ? ' · 주차' : ''}</div>
+      <div class="loc"></div></div>`;
+  row.querySelector('.star').onclick = () => toggleFav(s.storeName);
+  // 재고가 있는 매장은 진열 위치를 자동으로 조회
+  if (has) fillLocation(p.id, s.storeCode, row.querySelector('.loc'), () => seq === renderSeq);
+  $('stores').appendChild(row);
 }
 
 // ── 오른쪽 기본 화면: 즐겨찾기 매장 × 즐겨찾기 상품 재고표 ──
@@ -510,15 +586,19 @@ function floor(n) {
 $('searchForm').onsubmit = (e) => { e.preventDefault(); runSearch($('q').value.trim()); };
 $('more').onclick = () => search(state.page + 1);
 
-// 즐겨찾기 상품 영역 접기/펼치기 (상태는 브라우저에 기억)
-const FOLD_KEY = 'daiso-fav-folded';
-function setFavFolded(folded) {
-  $('favProducts').hidden = folded;
-  $('favToggle').setAttribute('aria-expanded', String(!folded));
-  try { localStorage.setItem(FOLD_KEY, folded ? '1' : ''); } catch {}
+// Results / Favorites 영역 접기/펼치기 (상태는 브라우저에 기억)
+function setupFold(btnId, bodyId, key) {
+  const setFolded = (folded, remember = true) => {
+    $(bodyId).hidden = folded;
+    $(btnId).setAttribute('aria-expanded', String(!folded));
+    if (remember) try { localStorage.setItem(key, folded ? '1' : ''); } catch {}
+  };
+  $(btnId).onclick = () => setFolded(!$(bodyId).hidden);
+  try { setFolded(localStorage.getItem(key) === '1', false); } catch {}
+  return setFolded;
 }
-$('favToggle').onclick = () => setFavFolded(!$('favProducts').hidden);
-try { setFavFolded(localStorage.getItem(FOLD_KEY) === '1'); } catch {}
+const setResultsFolded = setupFold('resultsToggle', 'resultsBody', 'daiso-results-folded');
+setupFold('favToggle', 'favProducts', 'daiso-fav-folded');
 $('storeForm').onsubmit = (e) => {
   e.preventDefault();
   if (state.product) showProductInventory();
