@@ -113,7 +113,12 @@
   .ov-row .loc { margin-top: 2px; font-size: 12px; }
   .loc:empty { display: none; }
   .dist { margin-left: auto; padding-left: 8px; font-size: 12px; font-weight: 500; color: var(--muted); font-variant-numeric: tabular-nums; }
-  .group { margin-top: 14px; padding: 6px 0; font-size: 11.5px; font-weight: 700; letter-spacing: .06em; color: var(--muted); }
+  .group { width: 100%; margin-top: 14px; padding: 6px 0; border: 0; border-bottom: 1px solid var(--line); background: none; display: flex; justify-content: space-between; align-items: center; gap: 8px; text-align: left; font-size: 11.5px; font-weight: 700; letter-spacing: .06em; color: var(--muted); }
+  .group .label { display: inline-flex; align-items: center; gap: 6px; }
+  .group .chev { transition: transform .2s; }
+  .group[aria-expanded="false"] .chev { transform: rotate(-90deg); }
+  .group:hover { color: var(--text); }
+  .group span:last-child { font-weight: 400; letter-spacing: 0; }
 </style>
 </head>
 <body>
@@ -495,8 +500,8 @@ async function showProductInventory() {
   const sections = query
     ? [{ title: null, list: uniq(coords ? groups.query.sort(byDistance) : groups.query) }]
     : [
-        { title: '즐겨찾기 매장', list: uniq(groups.fav) },
-        { title: here ? `내 주변 매장 · ${here.areas.join('·')}` : null, list: uniq(groups.near.sort(byDistance)).slice(0, NEAR_LIMIT) },
+        { title: '즐겨찾기 매장', key: 'fav', list: uniq(groups.fav) },
+        { title: here ? `내 주변 매장 · ${here.areas.join('·')}` : null, key: 'near', list: uniq(groups.near.sort(byDistance)).slice(0, NEAR_LIMIT) },
       ];
   const stores = sections.flatMap((s) => s.list);
 
@@ -509,18 +514,35 @@ async function showProductInventory() {
 
   for (const sec of sections) {
     if (!sec.list.length) continue;
-    if (sec.title && sections.filter((x) => x.list.length).length > 1) {
-      const h = document.createElement('div');
-      h.className = 'group';
-      h.textContent = sec.title;
-      $('stores').appendChild(h);
-    }
-    for (const s of sec.list) renderStoreRow(s, p, seq, !!coords);
+    const box = appendGroup(sec.title, sec.key, sec.list.length);
+    for (const s of sec.list) renderStoreRow(s, p, seq, !!coords, box);
   }
   syncStars();
 }
 
-function renderStoreRow(s, p, seq, showDistance) {
+// 매장 그룹 머리글(즐겨찾기 매장 / 내 주변 매장) — 누르면 접고 펼침, 상태는 그룹 종류별로 기억
+function appendGroup(title, key, count) {
+  if (!title) return $('stores');
+  const storageKey = 'daiso-group-folded-' + key;
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'group';
+  btn.innerHTML = `<span class="label"><svg class="chev" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>${esc(title)}</span><span>${count}곳</span>`;
+  const body = document.createElement('div');
+  const setFolded = (folded) => {
+    body.hidden = folded;
+    btn.setAttribute('aria-expanded', String(!folded));
+  };
+  btn.onclick = () => {
+    setFolded(!body.hidden);
+    try { localStorage.setItem(storageKey, body.hidden ? '1' : ''); } catch {}
+  };
+  try { setFolded(localStorage.getItem(storageKey) === '1'); } catch { setFolded(false); }
+  $('stores').append(btn, body);
+  return body;
+}
+
+function renderStoreRow(s, p, seq, showDistance, container) {
   const has = s.quantity > 0;
   const row = document.createElement('div');
   row.className = 'store';
@@ -531,7 +553,7 @@ function renderStoreRow(s, p, seq, showDistance) {
   row.querySelector('.star').onclick = () => toggleFav(s.storeName);
   // 재고가 있는 매장은 진열 위치를 자동으로 조회
   if (has) fillLocation(p.id, s.storeCode, row.querySelector('.loc'), () => seq === renderSeq);
-  $('stores').appendChild(row);
+  container.appendChild(row);
 }
 
 // ── 오른쪽 기본 화면: (즐겨찾기 매장 + 주변/입력 지역 매장) × 즐겨찾기 상품 재고표 ──
@@ -606,19 +628,14 @@ async function showOverview() {
   const areaEntries = [...stock.values()].filter((e) => e.kind === 'area');
   if (coords) areaEntries.sort(byDistance);
   const sections = [
-    { title: '즐겨찾기 매장', list: favEntries },
-    { title: areaTitle, list: areaEntries.slice(0, typed ? NEAR_LIMIT : OVERVIEW_NEAR_LIMIT) },
+    { title: '즐겨찾기 매장', key: 'fav', list: favEntries },
+    { title: areaTitle, key: typed ? 'area' : 'near', list: areaEntries.slice(0, typed ? NEAR_LIMIT : OVERVIEW_NEAR_LIMIT) },
   ].filter((s) => s.list.length);
   const failed = results.filter((r) => r.status === 'rejected').length;
 
   for (const sec of sections) {
-    if (sections.length > 1 && sec.title) {
-      const h = document.createElement('div');
-      h.className = 'group';
-      h.textContent = sec.title;
-      $('stores').appendChild(h);
-    }
-    for (const e of sec.list) renderOverviewStore(e, seq, !!coords);
+    const box = appendGroup(sec.title, sec.key, sec.list.length);
+    for (const e of sec.list) renderOverviewStore(e, seq, !!coords, box);
   }
   syncStars();
 
@@ -629,7 +646,7 @@ async function showOverview() {
     : failed ? '재고 조회에 실패했습니다. 잠시 후 다시 시도해 주세요.' : '해당 지역에서 매장을 찾지 못했습니다.';
 }
 
-function renderOverviewStore(entry, seq, showDistance) {
+function renderOverviewStore(entry, seq, showDistance, container) {
   const s = entry.store;
   const block = document.createElement('div');
   block.className = 'ov-store';
@@ -645,7 +662,7 @@ function renderOverviewStore(entry, seq, showDistance) {
     if (has) fillLocation(p.id, s.storeCode, row.querySelector('.loc'), () => seq === renderSeq);
     block.appendChild(row);
   }
-  $('stores').appendChild(block);
+  container.appendChild(block);
 }
 
 function floor(n) {
