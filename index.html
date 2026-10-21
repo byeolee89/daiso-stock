@@ -1,0 +1,534 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>다이소 재고 찾기</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css">
+<style>
+  :root {
+    --bg: #efefed; --surface: #f7f7f5; --img: #f2f3f7; --field: #dcdcdc;
+    --text: #111; --muted: #6f6f6f; --line: #c9c9c9; --soft: #e2e2e0;
+    --ink: #111; --ink-text: #fff; --ok: #1a7f37; --no: #9a9a9a; --star: #e0a100;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #141414; --surface: #1c1c1c; --img: #232428; --field: #2b2b2b;
+      --text: #ededed; --muted: #9a9a9a; --line: #3a3a3a; --soft: #2a2a2a;
+      --ink: #ededed; --ink-text: #111; --ok: #5bd17a; --no: #6b6b6b; --star: #f5c542;
+    }
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font-family: Pretendard, system-ui, "Malgun Gothic", sans-serif; letter-spacing: -0.01em;
+    /* 종이 질감 */
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence baseFrequency='.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.035'/%3E%3C/svg%3E");
+  }
+  button { font: inherit; cursor: pointer; }
+  button:disabled { opacity: .5; cursor: default; }
+
+  main { max-width: 1320px; margin: 0 auto; padding: 22px 16px 40px; display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: 36px; align-items: start; }
+  @media (max-width: 900px) { main { grid-template-columns: minmax(0, 1fr); gap: 28px; } }
+
+  /* 상단: 경로 + 제목 */
+  .crumb { font-size: 14px; color: var(--muted); }
+  .crumb b { color: var(--text); font-weight: 500; }
+  h1 { margin: 10px 0 20px; font-size: 26px; font-weight: 800; letter-spacing: .02em; text-transform: uppercase; }
+
+  /* 검색창 + 카테고리 */
+  .toolbar { display: flex; gap: 20px 36px; align-items: flex-start; flex-wrap: wrap; }
+  .search { display: flex; align-items: center; gap: 12px; flex: 0 1 340px; min-width: 240px; height: 46px; padding: 0 16px; background: var(--field); }
+  .search svg { flex: none; }
+  .search input { flex: 1; min-width: 0; border: 0; background: none; outline: none; font: inherit; font-size: 15px; color: var(--text); }
+  .search button { border: 0; background: none; color: var(--muted); font-size: 14px; letter-spacing: .08em; padding: 0; }
+  .search button:hover { color: var(--text); }
+  .cats { flex: 1; min-width: 260px; display: grid; grid-template-columns: repeat(auto-fill, minmax(92px, 1fr)); gap: 8px 12px; }
+  .cats button { height: 23px; padding: 0 6px; border: 1px solid var(--line); background: transparent; color: var(--muted); font-size: 11.5px; letter-spacing: .04em; white-space: nowrap; }
+  .cats button:hover { color: var(--text); border-color: var(--muted); }
+  .cats button.on { color: var(--text); border-color: var(--text); font-weight: 600; }
+
+  .section-title { margin: 36px 0 14px; font-size: 13px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+  .section-title span { font-weight: 400; color: var(--muted); letter-spacing: 0; text-transform: none; }
+  .hint { color: var(--muted); font-size: 13px; }
+  .toggle { width: 100%; border: 0; border-bottom: 1px solid var(--line); background: none; color: var(--text); padding: 0 0 10px; text-align: left; }
+  .toggle .label { display: inline-flex; align-items: center; gap: 8px; color: var(--text); font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+  .toggle .chev { transition: transform .2s; }
+  .toggle[aria-expanded="false"] .chev { transform: rotate(-90deg); }
+  .toggle:hover .label { text-decoration: underline; text-underline-offset: 4px; }
+
+  /* 상품 그리드 */
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 30px 36px; }
+  @media (max-width: 520px) { .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 22px 14px; } }
+  .card { position: relative; cursor: pointer; }
+  .card .thumb { position: relative; aspect-ratio: 5 / 6; background: var(--img); border: 1px solid var(--line); overflow: hidden; }
+  .card img { display: block; width: 100%; height: 100%; object-fit: cover; transition: transform .3s; }
+  .card:hover img { transform: scale(1.03); }
+  .card.active .thumb { border-color: var(--text); box-shadow: inset 0 0 0 1px var(--text); }
+  .card .sub { margin-top: 12px; font-size: 13px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .card .row { margin-top: 3px; display: flex; justify-content: space-between; gap: 12px; align-items: baseline; }
+  .card .name { font-size: 15px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .card .price { flex: none; font-size: 15px; font-weight: 500; }
+  .pstar { position: absolute; top: 10px; right: 10px; width: 30px; height: 30px; padding: 0; border: 1px solid var(--line); background: var(--surface); color: var(--muted); font-size: 15px; line-height: 28px; }
+  .pstar.on { color: var(--star); border-color: var(--star); }
+  .status { color: var(--muted); font-size: 13px; }
+  .more { display: block; margin: 32px auto 0; height: 36px; padding: 0 28px; border: 1px solid var(--text); background: transparent; color: var(--text); font-size: 12px; letter-spacing: .1em; }
+  .more:hover { background: var(--ink); color: var(--ink-text); }
+
+  /* 오른쪽: 매장별 재고 */
+  .panel { position: sticky; top: 22px; max-height: calc(100vh - 44px); overflow: auto; background: var(--surface); border: 1px solid var(--line); padding: 22px 20px; }
+  @media (max-width: 900px) { .panel { position: static; max-height: none; } }
+  .panel .eyebrow { font-size: 12px; font-weight: 700; letter-spacing: .1em; color: var(--muted); text-transform: uppercase; }
+  .panel h2 { margin: 8px 0 4px; font-size: 18px; font-weight: 700; line-height: 1.35; }
+  .summary { color: var(--muted); font-size: 13px; margin-bottom: 16px; display: flex; gap: 10px; flex-wrap: wrap; align-items: baseline; }
+  .link { border: 0; background: none; color: var(--text); padding: 0; font-size: 13px; text-decoration: underline; text-underline-offset: 3px; }
+  #storeForm { display: flex; height: 42px; }
+  #storeForm input { flex: 1; min-width: 0; border: 0; background: var(--field); padding: 0 14px; font: inherit; font-size: 14px; color: var(--text); outline: none; }
+  #storeForm button { border: 0; background: var(--ink); color: var(--ink-text); padding: 0 16px; font-size: 13px; letter-spacing: .04em; }
+  .favs { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; align-items: center; font-size: 12px; color: var(--muted); }
+  .chip { display: inline-flex; align-items: center; border: 1px solid var(--line); color: var(--text); font-size: 12px; }
+  .chip button { border: 0; background: none; color: inherit; padding: 4px 4px 4px 9px; }
+  .chip button.x { padding: 4px 8px 4px 4px; color: var(--muted); }
+  .chip:hover { border-color: var(--text); }
+  #invStatus { margin: 18px 0 6px; min-height: 18px; }
+  .store { border-top: 1px solid var(--soft); padding: 14px 0; display: flex; gap: 12px; align-items: flex-start; }
+  .store .info { flex: 1; min-width: 0; }
+  .sname { font-weight: 600; font-size: 14px; display: flex; align-items: center; gap: 2px; }
+  .store .addr { font-size: 12.5px; color: var(--muted); margin-top: 3px; line-height: 1.45; }
+  .star { border: 0; background: none; color: var(--muted); font-size: 17px; padding: 0 4px; line-height: 1; }
+  .star.on { color: var(--star); }
+  .qty { font-weight: 700; font-size: 14px; min-width: 60px; font-variant-numeric: tabular-nums; }
+  .qty.ok { color: var(--ok); } .qty.no { color: var(--no); }
+  .loc { font-size: 12.5px; margin-top: 6px; font-weight: 600; }
+  .ov-store { border-top: 1px solid var(--soft); padding: 14px 0 8px; }
+  .ov-store .sname { margin-bottom: 6px; }
+  .ov-row { display: flex; gap: 10px; align-items: flex-start; padding: 6px 0; font-size: 13px; cursor: pointer; }
+  .ov-row:hover .pname { text-decoration: underline; text-underline-offset: 3px; }
+  .ov-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  .ov-row .pname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ov-row .loc { margin-top: 2px; font-size: 12px; }
+  .loc:empty { display: none; }
+</style>
+</head>
+<body>
+<main>
+  <!-- 왼쪽: 상품 검색 -->
+  <section>
+    <div class="crumb">Daiso / <b>Products</b></div>
+    <h1>Products</h1>
+    <div class="toolbar">
+      <form class="search" id="searchForm">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg>
+        <input id="q" placeholder="상품명을 입력하세요" required aria-label="상품 검색">
+        <button>Search</button>
+      </form>
+      <div class="cats" id="cats"></div>
+    </div>
+
+    <button type="button" class="section-title toggle" id="favToggle" aria-expanded="true" aria-controls="favProducts">
+      <span class="label"><svg class="chev" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>★ Favorites</span>
+      <span id="favCount"></span>
+    </button>
+    <div class="grid" id="favProducts"></div>
+
+    <div class="section-title" id="resultsTitle" hidden>Results <span id="status"></span></div>
+    <div class="grid" id="results"></div>
+    <button class="more" id="more" hidden>MORE</button>
+  </section>
+
+  <!-- 오른쪽: 매장별 재고 현황 -->
+  <aside class="panel">
+    <div class="eyebrow">Stock by store</div>
+    <h2 id="pName">즐겨찾기 재고 현황</h2>
+    <div class="summary" id="pInfo"></div>
+    <form id="storeForm">
+      <input id="store" placeholder="지역·매장명 (예: 강남역, 수원)">
+      <button>재고 확인</button>
+    </form>
+    <div class="favs" id="favs"></div>
+    <div class="status" id="invStatus"></div>
+    <div id="stores"></div>
+  </aside>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+const won = (n) => Number(n).toLocaleString('ko-KR') + '원';
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+let state = { q: '', page: 1, product: null };
+let renderSeq = 0; // 오래된 응답이 최신 화면을 덮어쓰지 않도록
+
+// 카테고리 버튼 = 자주 찾는 검색어
+const CATEGORIES = ['수납', '주방', '욕실', '청소', '문구', '뷰티', '인테리어', '여행', '반려동물', '전자기기'];
+
+// ── daiso-mcp 클라이언트 (브라우저에서 MCP 서버를 직접 호출) ──
+const MCP_URL = 'https://mcp.aka.page';
+let mcpSession = null;
+let mcpInit = null;
+let rpcId = 1;
+
+// JSON-RPC 요청을 보내고 SSE/JSON 응답을 파싱
+async function mcpRequest(method, params) {
+  const headers = { 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream' };
+  if (mcpSession) headers['mcp-session-id'] = mcpSession;
+  const res = await fetch(MCP_URL, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ jsonrpc: '2.0', id: rpcId++, method, params }),
+  });
+  const sid = res.headers.get('mcp-session-id');
+  if (sid) mcpSession = sid;
+  if (!res.ok) throw new Error(`MCP HTTP ${res.status}`);
+  const text = await res.text();
+  const payload = text.trim().startsWith('{')
+    ? text
+    : text.split('\n').filter((l) => l.startsWith('data:')).map((l) => l.slice(5).trim()).join('');
+  const msg = JSON.parse(payload);
+  if (msg.error) throw new Error(msg.error.message || 'MCP 오류');
+  return msg.result;
+}
+
+// 동시에 여러 요청이 와도 initialize는 한 번만
+function ensureSession() {
+  mcpInit ??= mcpRequest('initialize', {
+    protocolVersion: '2025-03-26',
+    capabilities: {},
+    clientInfo: { name: 'daiso-web', version: '1.0.0' },
+  }).catch((e) => { mcpInit = null; throw e; });
+  return mcpInit;
+}
+
+async function callTool(name, args) {
+  await ensureSession();
+  let result;
+  try {
+    result = await mcpRequest('tools/call', { name, arguments: args });
+  } catch {
+    // 세션 만료 등은 새 세션으로 한 번 재시도
+    mcpSession = null;
+    mcpInit = null;
+    await ensureSession();
+    result = await mcpRequest('tools/call', { name, arguments: args });
+  }
+  if (result.isError) throw new Error(result.content?.[0]?.text || '도구 실행 실패');
+  return result.structuredContent ?? JSON.parse(result.content?.[0]?.text || '{}');
+}
+
+const mcp = {
+  search: (query, page) => callTool('search_products', { service: 'daiso', query, page, pageSize: 12 }),
+  inventory: (productId, store) =>
+    callTool('check_inventory', { service: 'daiso', operation: 'by_id', productId, storeQuery: store || undefined, pageSize: 20 }),
+  location: (productId, storeCode) =>
+    callTool('get_product_details', { service: 'daiso', operation: 'display_location', productId, storeCode }),
+};
+
+// 같은 상품·매장 조합은 1분간 캐시
+const invCache = new Map();
+function fetchInventory(id, store) {
+  const key = id + '|' + store;
+  const hit = invCache.get(key);
+  if (hit && Date.now() - hit.t < 60000) return hit.p;
+  const p = mcp.inventory(id, store);
+  invCache.set(key, { t: Date.now(), p });
+  p.catch(() => invCache.delete(key));
+  return p;
+}
+
+// 진열 위치도 상품·매장 조합별로 캐시 (자주 바뀌지 않으므로 10분)
+const locCache = new Map();
+function fetchLocation(id, storeCode) {
+  const key = id + '|' + storeCode;
+  const hit = locCache.get(key);
+  if (hit && Date.now() - hit.t < 600000) return hit.p;
+  const p = mcp.location(id, storeCode);
+  locCache.set(key, { t: Date.now(), p });
+  p.catch(() => locCache.delete(key));
+  return p;
+}
+
+// 진열 위치를 받아 box에 표시 (stillValid가 false면 화면이 바뀐 것이므로 무시)
+function fillLocation(id, storeCode, box, stillValid) {
+  box.textContent = '진열 위치 조회 중…';
+  fetchLocation(id, storeCode).then((data) => {
+    if (!stillValid()) return;
+    const locs = data.locations || [];
+    box.textContent = data.hasLocation && locs.length
+      ? '📍 ' + locs.map((l) => `${floor(l.stairNo)} ${l.zoneNo}번 매대`).join(', ')
+      : '진열 위치 정보 없음';
+  }).catch(() => { if (stillValid()) box.textContent = '진열 위치 조회 실패'; });
+}
+
+// ── 즐겨찾기 (브라우저 localStorage) ──
+function load(key) { try { return JSON.parse(localStorage.getItem(key)) || []; } catch { return []; } }
+function save(key, v) { try { localStorage.setItem(key, JSON.stringify(v)); } catch {} }
+const FAV_KEY = 'daiso-fav-stores';
+const PFAV_KEY = 'daiso-fav-products';
+let favs = load(FAV_KEY);
+let favProducts = load(PFAV_KEY);
+
+const isFav = (name) => favs.includes(name);
+const isFavProduct = (id) => favProducts.some((p) => p.id === id);
+
+function toggleFav(name) {
+  favs = isFav(name) ? favs.filter((f) => f !== name) : [...favs, name];
+  save(FAV_KEY, favs);
+  renderFavs();
+  syncStars();
+  if (!state.product) showOverview();
+}
+
+function toggleFavProduct(p) {
+  favProducts = isFavProduct(p.id)
+    ? favProducts.filter((f) => f.id !== p.id)
+    : [...favProducts, { id: p.id, name: p.name, price: p.price, imageUrl: p.imageUrl, soldOut: p.soldOut, isNew: p.isNew, pickupAvailable: p.pickupAvailable }];
+  save(PFAV_KEY, favProducts);
+  renderFavProducts();
+  syncProductStars();
+  if (!state.product) showOverview();
+}
+
+function renderFavs() {
+  const box = $('favs');
+  box.innerHTML = favs.length ? '즐겨찾기 매장' : '매장 옆 ☆를 누르면 즐겨찾기 매장으로 등록돼요.';
+  for (const name of favs) {
+    const chip = document.createElement('span');
+    chip.className = 'chip';
+    chip.innerHTML = `<button type="button" title="이 매장 재고 보기">${esc(name)}</button><button type="button" class="x" title="삭제">✕</button>`;
+    const [go, del] = chip.querySelectorAll('button');
+    go.onclick = () => { $('store').value = name; state.product ? showProductInventory() : showOverview(); };
+    del.onclick = () => toggleFav(name);
+    box.appendChild(chip);
+  }
+}
+
+function syncStars() {
+  document.querySelectorAll('.star').forEach((b) => {
+    const on = isFav(b.dataset.name);
+    b.classList.toggle('on', on);
+    b.textContent = on ? '★' : '☆';
+  });
+}
+
+// ── 왼쪽: 상품 카드 ──
+function makeCard(p) {
+  const el = document.createElement('div');
+  el.className = 'card';
+  el.dataset.id = p.id;
+  const sub = [p.isNew && 'NEW', p.pickupAvailable && '매장픽업', p.soldOut && '온라인 품절'].filter(Boolean).join(' · ') || '다이소';
+  el.innerHTML = `<div class="thumb"><img src="${esc(p.imageUrl)}" alt="" loading="lazy">
+      <button type="button" class="pstar" title="즐겨찾기" data-id="${esc(p.id)}"></button></div>
+    <div class="sub">${esc(sub)}</div>
+    <div class="row"><div class="name" title="${esc(p.name)}">${esc(p.name)}</div><div class="price">${won(p.price)}</div></div>`;
+  el.onclick = () => selectProduct(p);
+  el.querySelector('.pstar').onclick = (e) => { e.stopPropagation(); toggleFavProduct(p); };
+  return el;
+}
+
+function renderFavProducts() {
+  const box = $('favProducts');
+  $('favCount').textContent = favProducts.length ? `${favProducts.length}개` : '';
+  box.innerHTML = favProducts.length ? '' : '<div class="hint">상품 이미지의 ☆를 누르면 여기에 항상 표시돼요.</div>';
+  for (const p of favProducts) box.appendChild(makeCard(p));
+  markActive();
+}
+
+function syncProductStars() {
+  document.querySelectorAll('.pstar').forEach((b) => {
+    const on = isFavProduct(b.dataset.id);
+    b.classList.toggle('on', on);
+    b.textContent = on ? '★' : '☆';
+  });
+}
+
+function markActive() {
+  const id = state.product?.id;
+  document.querySelectorAll('.card').forEach((c) => c.classList.toggle('active', c.dataset.id === id));
+}
+
+function renderCats() {
+  $('cats').innerHTML = '';
+  for (const c of CATEGORIES) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.textContent = c;
+    b.classList.toggle('on', state.q === c);
+    b.onclick = () => { $('q').value = c; runSearch(c); };
+    $('cats').appendChild(b);
+  }
+}
+
+function runSearch(q) {
+  state.q = q;
+  renderCats();
+  search(1);
+}
+
+async function search(page) {
+  $('resultsTitle').hidden = false;
+  $('status').textContent = '검색 중…';
+  $('more').hidden = true;
+  if (page === 1) $('results').innerHTML = '';
+  try {
+    const data = await mcp.search(state.q, page);
+    state.page = page;
+    $('status').textContent = data.totalCount ? `'${state.q}' ${data.totalCount.toLocaleString()}개` : `'${state.q}' 검색 결과가 없습니다.`;
+    for (const p of data.products || []) $('results').appendChild(makeCard(p));
+    syncProductStars();
+    markActive();
+    $('more').hidden = page * 12 >= (data.totalCount || 0);
+  } catch (e) {
+    $('status').textContent = '오류: ' + e.message;
+  }
+}
+
+function selectProduct(p) {
+  state.product = p;
+  markActive();
+  showProductInventory();
+  if (window.matchMedia('(max-width: 900px)').matches) document.querySelector('.panel').scrollIntoView({ behavior: 'smooth' });
+}
+
+// ── 오른쪽: 선택한 상품의 매장별 재고 ──
+async function showProductInventory() {
+  const p = state.product;
+  const seq = ++renderSeq;
+  const query = $('store').value.trim();
+  $('pName').textContent = p.name;
+  $('pInfo').innerHTML = `<span>${won(p.price)} · 상품번호 ${esc(p.id)}</span><button type="button" class="link" id="backBtn">← 즐겨찾기 현황</button>`;
+  $('backBtn').onclick = () => { state.product = null; $('store').value = ''; markActive(); showOverview(); };
+  $('stores').innerHTML = '';
+
+  // 검색어가 없으면 즐겨찾기 매장 기준으로 자동 조회
+  const targets = query ? [query] : favs;
+  if (!targets.length) {
+    $('invStatus').textContent = '지역·매장명을 입력하거나 매장을 즐겨찾기에 등록하세요.';
+    return;
+  }
+  $('invStatus').textContent = query ? '매장 재고 조회 중…' : '즐겨찾기 매장 재고 조회 중…';
+
+  const results = await Promise.allSettled(targets.map((t) => fetchInventory(p.id, t)));
+  if (seq !== renderSeq) return;
+
+  let stores = [];
+  let online = null;
+  results.forEach((r, i) => {
+    if (r.status !== 'fulfilled') return;
+    online = r.value.onlineStock ?? online;
+    const list = r.value.storeInventory?.stores || [];
+    // 즐겨찾기 조회는 이름이 정확히 일치하는 매장만
+    stores.push(...(query ? list : list.filter((s) => s.storeName === targets[i]).slice(0, 1)));
+  });
+  stores = stores.filter((s, i) => stores.findIndex((o) => o.storeCode === s.storeCode) === i);
+
+  const failed = results.filter((r) => r.status === 'rejected').length;
+  const inStock = stores.filter((s) => s.quantity > 0).length;
+  $('invStatus').textContent = stores.length
+    ? `${query ? `'${query}'` : '즐겨찾기'} 매장 ${stores.length}곳 중 재고 있음 ${inStock}곳 · 온라인 재고 ${online ?? '-'}개${failed ? ` (조회 실패 ${failed}건)` : ''}`
+    : failed ? '재고 조회에 실패했습니다. 잠시 후 다시 시도해 주세요.' : '해당 지역에서 매장을 찾지 못했습니다.';
+
+  for (const s of stores) {
+    const has = s.quantity > 0;
+    const row = document.createElement('div');
+    row.className = 'store';
+    row.innerHTML = `<div class="qty ${has ? 'ok' : 'no'}">${s.quantity == null ? '확인불가' : has ? s.quantity + '개' : '재고없음'}</div>
+      <div class="info"><div class="sname">${esc(s.storeName)}<button type="button" class="star" title="즐겨찾기" data-name="${esc(s.storeName)}"></button></div>
+        <div class="addr">${esc(s.address)} · ${esc(s.openTime)}~${esc(s.closeTime)}${s.options?.parking ? ' · 주차' : ''}</div>
+        <div class="loc"></div></div>`;
+    row.querySelector('.star').onclick = () => toggleFav(s.storeName);
+    // 재고가 있는 매장은 진열 위치를 자동으로 조회
+    if (has) fillLocation(p.id, s.storeCode, row.querySelector('.loc'), () => seq === renderSeq);
+    $('stores').appendChild(row);
+  }
+  syncStars();
+}
+
+// ── 오른쪽 기본 화면: 즐겨찾기 매장 × 즐겨찾기 상품 재고표 ──
+async function showOverview() {
+  const seq = ++renderSeq;
+  const only = $('store').value.trim();
+  const storeList = only && favs.includes(only) ? [only] : favs;
+  $('pName').textContent = '즐겨찾기 재고 현황';
+  $('pInfo').textContent = '즐겨찾기 매장별로 즐겨찾기 상품의 재고를 보여줘요. 상품을 누르면 자세히 볼 수 있어요.';
+  $('stores').innerHTML = '';
+
+  if (!favProducts.length || !storeList.length) {
+    $('invStatus').textContent = !favProducts.length && !storeList.length
+      ? '왼쪽에서 상품을 고르거나, 상품·매장에 ☆를 눌러 즐겨찾기하면 여기에 자동으로 표시돼요.'
+      : !favProducts.length ? '상품을 즐겨찾기하면 즐겨찾기 매장의 재고가 자동으로 표시돼요.'
+      : '왼쪽에서 상품을 눌러 재고를 조회한 뒤 매장 옆 ☆를 눌러 즐겨찾기하세요.';
+    return;
+  }
+  $('invStatus').textContent = '재고 현황 불러오는 중…';
+
+  // 매장마다 블록을 먼저 그리고, 결과가 오는 대로 채움
+  const blocks = storeList.map((name) => {
+    const block = document.createElement('div');
+    block.className = 'ov-store';
+    block.innerHTML = `<div class="sname">${esc(name)}<button type="button" class="star" title="즐겨찾기" data-name="${esc(name)}"></button></div>`;
+    block.querySelector('.star').onclick = () => toggleFav(name);
+    $('stores').appendChild(block);
+    const rows = {};
+    for (const p of favProducts) {
+      const row = document.createElement('div');
+      row.className = 'ov-row';
+      row.innerHTML = `<span class="qty no">…</span><span class="ov-main"><span class="pname">${esc(p.name)}</span><span class="loc"></span></span>`;
+      row.onclick = () => { $('store').value = name; selectProduct(p); };
+      block.appendChild(row);
+      rows[p.id] = row;
+    }
+    return { name, rows };
+  });
+  syncStars();
+
+  const jobs = [];
+  for (const b of blocks) {
+    for (const p of favProducts) {
+      jobs.push(fetchInventory(p.id, b.name).then((data) => {
+        if (seq !== renderSeq) return;
+        const s = (data.storeInventory?.stores || []).find((x) => x.storeName === b.name);
+        const row = b.rows[p.id];
+        const el = row.querySelector('.qty');
+        if (!s || s.quantity == null) { el.textContent = '확인불가'; return; }
+        el.textContent = s.quantity > 0 ? s.quantity + '개' : '재고없음';
+        el.className = 'qty ' + (s.quantity > 0 ? 'ok' : 'no');
+        if (s.quantity > 0) fillLocation(p.id, s.storeCode, row.querySelector('.loc'), () => seq === renderSeq);
+      }).catch(() => { if (seq === renderSeq) b.rows[p.id].querySelector('.qty').textContent = '오류'; }));
+    }
+  }
+  await Promise.all(jobs);
+  if (seq === renderSeq) $('invStatus').textContent = `매장 ${storeList.length}곳 · 상품 ${favProducts.length}개`;
+}
+
+function floor(n) {
+  const v = Number(n);
+  if (Number.isNaN(v)) return '';
+  return v < 0 ? `지하 ${-v}층` : `${v}층`;
+}
+
+$('searchForm').onsubmit = (e) => { e.preventDefault(); runSearch($('q').value.trim()); };
+$('more').onclick = () => search(state.page + 1);
+
+// 즐겨찾기 상품 영역 접기/펼치기 (상태는 브라우저에 기억)
+const FOLD_KEY = 'daiso-fav-folded';
+function setFavFolded(folded) {
+  $('favProducts').hidden = folded;
+  $('favToggle').setAttribute('aria-expanded', String(!folded));
+  try { localStorage.setItem(FOLD_KEY, folded ? '1' : ''); } catch {}
+}
+$('favToggle').onclick = () => setFavFolded(!$('favProducts').hidden);
+try { setFavFolded(localStorage.getItem(FOLD_KEY) === '1'); } catch {}
+$('storeForm').onsubmit = (e) => {
+  e.preventDefault();
+  if (state.product) showProductInventory();
+  else $('invStatus').textContent = '왼쪽에서 상품을 먼저 선택하세요.';
+};
+
+renderCats();
+renderFavs();
+renderFavProducts();
+syncProductStars();
+showOverview();
+</script>
+</body>
+</html>
