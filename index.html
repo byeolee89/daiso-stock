@@ -73,6 +73,8 @@
   .card .price { flex: none; font-size: 15px; font-weight: 500; }
   .pstar { position: absolute; top: 10px; right: 10px; width: 30px; height: 30px; padding: 0; border: 1px solid var(--line); background: var(--surface); color: var(--muted); font-size: 15px; line-height: 28px; }
   .pstar.on { color: var(--star); border-color: var(--star); }
+  .mall { position: absolute; right: 10px; bottom: 10px; width: 30px; height: 30px; border: 1px solid var(--line); background: var(--surface); color: var(--text); font-size: 15px; line-height: 28px; text-align: center; text-decoration: none; }
+  .mall:hover { background: var(--ink); color: var(--ink-text); }
   .status { color: var(--muted); font-size: 13px; }
   .more { display: block; margin: 32px auto 0; height: 36px; padding: 0 28px; border: 1px solid var(--text); background: transparent; color: var(--text); font-size: 12px; letter-spacing: .1em; }
   .more:hover { background: var(--ink); color: var(--ink-text); }
@@ -162,6 +164,7 @@
 <script>
 const $ = (id) => document.getElementById(id);
 const won = (n) => Number(n).toLocaleString('ko-KR') + '원';
+const mallUrl = (id) => `https://www.daisomall.co.kr/pd/pdr/SCR_PDR_0001?pdNo=${encodeURIComponent(id)}`;
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 let state = { q: '', page: 1, product: null };
 let renderSeq = 0; // 오래된 응답이 최신 화면을 덮어쓰지 않도록
@@ -360,11 +363,13 @@ function makeCard(p, { showCode = false } = {}) {
   el.dataset.id = p.id;
   const sub = [showCode && `품번 ${p.id}`, p.isNew && 'NEW', p.pickupAvailable && '매장픽업', p.soldOut && '온라인 품절'].filter(Boolean).join(' · ') || '다이소';
   el.innerHTML = `<div class="thumb"><img src="${esc(p.imageUrl)}" alt="" loading="lazy">
-      <button type="button" class="pstar" title="즐겨찾기" data-id="${esc(p.id)}"></button></div>
+      <button type="button" class="pstar" title="즐겨찾기" data-id="${esc(p.id)}"></button>
+      <a class="mall" href="${mallUrl(p.id)}" target="_blank" rel="noopener" title="다이소몰에서 보기" aria-label="다이소몰에서 보기">↗</a></div>
     <div class="sub">${esc(sub)}</div>
     <div class="row"><div class="name" title="${esc(p.name)}">${esc(p.name)}</div><div class="price">${won(p.price)}</div></div>`;
   el.onclick = () => selectProduct(p);
   el.querySelector('.pstar').onclick = (e) => { e.stopPropagation(); toggleFavProduct(p); };
+  el.querySelector('.mall').onclick = (e) => e.stopPropagation(); // 링크만 열고 상품 선택은 하지 않음
   return el;
 }
 
@@ -448,7 +453,7 @@ async function showProductInventory() {
   const seq = ++renderSeq;
   const query = $('store').value.trim();
   $('pName').textContent = p.name;
-  $('pInfo').innerHTML = `<span>${won(p.price)} · 상품번호 ${esc(p.id)}</span><button type="button" class="link" id="backBtn">← 즐겨찾기 현황</button>`;
+  $('pInfo').innerHTML = `<span>${won(p.price)} · 상품번호 ${esc(p.id)}</span><a class="link" href="${mallUrl(p.id)}" target="_blank" rel="noopener">다이소몰에서 보기 ↗</a><button type="button" class="link" id="backBtn">← 즐겨찾기 현황</button>`;
   $('backBtn').onclick = deselectProduct;
   $('stores').innerHTML = '';
 
