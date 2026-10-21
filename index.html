@@ -427,10 +427,19 @@ async function search(page) {
 }
 
 function selectProduct(p) {
+  // 이미 선택된 상품을 다시 누르면 선택 해제
+  if (state.product?.id === p.id) return deselectProduct();
   state.product = p;
   markActive();
   showProductInventory();
   if (window.matchMedia('(max-width: 900px)').matches) document.querySelector('.panel').scrollIntoView({ behavior: 'smooth' });
+}
+
+function deselectProduct() {
+  state.product = null;
+  $('store').value = '';
+  markActive();
+  showOverview();
 }
 
 // ── 오른쪽: 선택한 상품의 매장별 재고 ──
@@ -440,7 +449,7 @@ async function showProductInventory() {
   const query = $('store').value.trim();
   $('pName').textContent = p.name;
   $('pInfo').innerHTML = `<span>${won(p.price)} · 상품번호 ${esc(p.id)}</span><button type="button" class="link" id="backBtn">← 즐겨찾기 현황</button>`;
-  $('backBtn').onclick = () => { state.product = null; $('store').value = ''; markActive(); showOverview(); };
+  $('backBtn').onclick = deselectProduct;
   $('stores').innerHTML = '';
 
   // 검색어가 없으면 즐겨찾기 매장 + 현재 위치 주변 매장을 자동 조회
