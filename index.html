@@ -253,9 +253,10 @@ function fillLocation(id, storeCode, box, stillValid) {
   fetchLocation(id, storeCode).then((data) => {
     if (!stillValid()) return;
     const locs = data.locations || [];
-    box.textContent = data.hasLocation && locs.length
+    const where = data.hasLocation && locs.length
       ? '📍 ' + locs.map((l) => `${floor(l.stairNo)} ${l.zoneNo}번 매대`).join(', ')
       : '진열 위치 정보 없음';
+    box.textContent = `${where} (품번 ${id})`;
   }).catch(() => { if (stillValid()) box.textContent = '진열 위치 조회 실패'; });
 }
 
