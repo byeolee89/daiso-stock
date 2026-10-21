@@ -312,11 +312,11 @@ function syncStars() {
 }
 
 // ── 왼쪽: 상품 카드 ──
-function makeCard(p) {
+function makeCard(p, { showCode = false } = {}) {
   const el = document.createElement('div');
   el.className = 'card';
   el.dataset.id = p.id;
-  const sub = [p.isNew && 'NEW', p.pickupAvailable && '매장픽업', p.soldOut && '온라인 품절'].filter(Boolean).join(' · ') || '다이소';
+  const sub = [showCode && `품번 ${p.id}`, p.isNew && 'NEW', p.pickupAvailable && '매장픽업', p.soldOut && '온라인 품절'].filter(Boolean).join(' · ') || '다이소';
   el.innerHTML = `<div class="thumb"><img src="${esc(p.imageUrl)}" alt="" loading="lazy">
       <button type="button" class="pstar" title="즐겨찾기" data-id="${esc(p.id)}"></button></div>
     <div class="sub">${esc(sub)}</div>
@@ -330,7 +330,7 @@ function renderFavProducts() {
   const box = $('favProducts');
   $('favCount').textContent = favProducts.length ? `${favProducts.length}개` : '';
   box.innerHTML = favProducts.length ? '' : '<div class="hint">상품 이미지의 ☆를 누르면 여기에 항상 표시돼요.</div>';
-  for (const p of favProducts) box.appendChild(makeCard(p));
+  for (const p of favProducts) box.appendChild(makeCard(p, { showCode: true }));
   markActive();
 }
 
