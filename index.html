@@ -529,61 +529,118 @@ function renderStoreRow(s, p, seq, showDistance) {
   $('stores').appendChild(row);
 }
 
-// ── 오른쪽 기본 화면: 즐겨찾기 매장 × 즐겨찾기 상품 재고표 ──
+// ── 오른쪽 기본 화면: (즐겨찾기 매장 + 주변/입력 지역 매장) × 즐겨찾기 상품 재고표 ──
+const OVERVIEW_NEAR_LIMIT = 5;
+
 async function showOverview() {
   const seq = ++renderSeq;
-  const only = $('store').value.trim();
-  const storeList = only && favs.includes(only) ? [only] : favs;
+  const typed = $('store').value.trim();
   $('pName').textContent = '즐겨찾기 재고 현황';
-  $('pInfo').textContent = '즐겨찾기 매장별로 즐겨찾기 상품의 재고를 보여줘요. 상품을 누르면 자세히 볼 수 있어요.';
+  $('pInfo').textContent = '매장별로 즐겨찾기 상품의 재고를 보여줘요. 지역을 비워두면 내 주변 매장도 함께 보여줘요.';
   $('stores').innerHTML = '';
 
-  if (!favProducts.length || !storeList.length) {
-    $('invStatus').textContent = !favProducts.length && !storeList.length
-      ? '왼쪽에서 상품을 고르거나, 상품·매장에 ☆를 눌러 즐겨찾기하면 여기에 자동으로 표시돼요.'
-      : !favProducts.length ? '상품을 즐겨찾기하면 즐겨찾기 매장의 재고가 자동으로 표시돼요.'
-      : '왼쪽에서 상품을 눌러 재고를 조회한 뒤 매장 옆 ☆를 눌러 즐겨찾기하세요.';
+  if (!favProducts.length) {
+    $('invStatus').textContent = '왼쪽 상품의 ☆를 눌러 즐겨찾기하면 즐겨찾기·주변 매장의 재고가 여기에 자동으로 표시돼요.';
     return;
   }
+
+  // 보여줄 매장: 입력이 즐겨찾기 매장명이면 그 매장만, 다른 입력이면 그 지역, 비어 있으면 즐겨찾기 + 내 주변
+  let favList = [];
+  let areas = [];
+  let areaTitle = null;
+  let hereErr = null;
+  if (typed && favs.includes(typed)) {
+    favList = [typed];
+  } else if (typed) {
+    areas = [typed];
+    areaTitle = `'${typed}' 매장`;
+  } else {
+    favList = favs;
+    $('invStatus').textContent = '현재 위치 확인 중…';
+    try {
+      await getHere();
+      areas = here.areas;
+      areaTitle = `내 주변 매장 · ${here.areas.join('·')}`;
+    } catch (e) {
+      hereErr = e.message;
+    }
+    if (seq !== renderSeq) return;
+  }
+  if (!favList.length && !areas.length) {
+    $('invStatus').textContent = `${hereErr ? hereErr + '. ' : ''}지역·매장명을 입력하거나 매장을 즐겨찾기에 등록하세요.`;
+    return;
+  }
+  const coords = here && { lat: here.lat, lng: here.lng };
   $('invStatus').textContent = '재고 현황 불러오는 중…';
 
-  // 매장마다 블록을 먼저 그리고, 결과가 오는 대로 채움
-  const blocks = storeList.map((name) => {
-    const block = document.createElement('div');
-    block.className = 'ov-store';
-    block.innerHTML = `<div class="sname">${esc(name)}<button type="button" class="star" title="즐겨찾기" data-name="${esc(name)}"></button></div>`;
-    block.querySelector('.star').onclick = () => toggleFav(name);
-    $('stores').appendChild(block);
-    const rows = {};
-    for (const p of favProducts) {
-      const row = document.createElement('div');
-      row.className = 'ov-row';
-      row.innerHTML = `<span class="qty no">…</span><span class="ov-main"><span class="pname">${esc(p.name)}</span><span class="loc"></span></span>`;
-      row.onclick = () => { $('store').value = name; selectProduct(p); };
-      block.appendChild(row);
-      rows[p.id] = row;
+  // 상품 × (즐겨찾기 매장명 | 지역) 조합을 모두 조회해서 매장별 재고표로 합침
+  const jobs = favProducts.flatMap((p) => [
+    ...favList.map((q) => ({ p, q, kind: 'fav' })),
+    ...areas.map((q) => ({ p, q, kind: 'area' })),
+  ]);
+  const results = await Promise.allSettled(jobs.map((j) => fetchInventory(j.p.id, j.q, coords)));
+  if (seq !== renderSeq) return;
+
+  const stock = new Map(); // storeCode → { store, kind, byProduct: { productId: store } }
+  results.forEach((r, i) => {
+    if (r.status !== 'fulfilled') return;
+    const { p, q, kind } = jobs[i];
+    let list = r.value.storeInventory?.stores || [];
+    if (kind === 'fav') list = list.filter((s) => s.storeName === q).slice(0, 1);
+    else if (!typed) list = list.filter((s) => Number(s.distance) <= NEAR_MAX_KM);
+    for (const s of list) {
+      const entry = stock.get(s.storeCode) ?? { store: s, kind, byProduct: {} };
+      if (kind === 'fav') entry.kind = 'fav';
+      entry.byProduct[p.id] = s;
+      stock.set(s.storeCode, entry);
     }
-    return { name, rows };
   });
+
+  const byDistance = (a, b) => Number(a.store.distance) - Number(b.store.distance);
+  const favEntries = favList.map((name) => [...stock.values()].find((e) => e.kind === 'fav' && e.store.storeName === name)).filter(Boolean);
+  const areaEntries = [...stock.values()].filter((e) => e.kind === 'area');
+  if (coords) areaEntries.sort(byDistance);
+  const sections = [
+    { title: '즐겨찾기 매장', list: favEntries },
+    { title: areaTitle, list: areaEntries.slice(0, typed ? NEAR_LIMIT : OVERVIEW_NEAR_LIMIT) },
+  ].filter((s) => s.list.length);
+  const failed = results.filter((r) => r.status === 'rejected').length;
+
+  for (const sec of sections) {
+    if (sections.length > 1 && sec.title) {
+      const h = document.createElement('div');
+      h.className = 'group';
+      h.textContent = sec.title;
+      $('stores').appendChild(h);
+    }
+    for (const e of sec.list) renderOverviewStore(e, seq, !!coords);
+  }
   syncStars();
 
-  const jobs = [];
-  for (const b of blocks) {
-    for (const p of favProducts) {
-      jobs.push(fetchInventory(p.id, b.name).then((data) => {
-        if (seq !== renderSeq) return;
-        const s = (data.storeInventory?.stores || []).find((x) => x.storeName === b.name);
-        const row = b.rows[p.id];
-        const el = row.querySelector('.qty');
-        if (!s || s.quantity == null) { el.textContent = '확인불가'; return; }
-        el.textContent = s.quantity > 0 ? s.quantity + '개' : '재고없음';
-        el.className = 'qty ' + (s.quantity > 0 ? 'ok' : 'no');
-        if (s.quantity > 0) fillLocation(p.id, s.storeCode, row.querySelector('.loc'), () => seq === renderSeq);
-      }).catch(() => { if (seq === renderSeq) b.rows[p.id].querySelector('.qty').textContent = '오류'; }));
-    }
+  const shown = sections.reduce((n, s) => n + s.list.length, 0);
+  const scope = typed && !favList.length ? `'${typed}' 기준 · ` : here && areas.length ? `📍 ${here.label} 기준 · ` : '';
+  $('invStatus').textContent = shown
+    ? `${scope}매장 ${shown}곳 · 상품 ${favProducts.length}개${failed ? ` (조회 실패 ${failed}건)` : ''}${hereErr ? ` · ${hereErr}(즐겨찾기만 표시)` : ''}`
+    : failed ? '재고 조회에 실패했습니다. 잠시 후 다시 시도해 주세요.' : '해당 지역에서 매장을 찾지 못했습니다.';
+}
+
+function renderOverviewStore(entry, seq, showDistance) {
+  const s = entry.store;
+  const block = document.createElement('div');
+  block.className = 'ov-store';
+  block.innerHTML = `<div class="sname">${esc(s.storeName)}<button type="button" class="star" title="즐겨찾기" data-name="${esc(s.storeName)}"></button>${showDistance && s.distance != null ? `<span class="dist">${esc(s.distance)}km</span>` : ''}</div>`;
+  block.querySelector('.star').onclick = () => toggleFav(s.storeName);
+  for (const p of favProducts) {
+    const st = entry.byProduct[p.id];
+    const has = st?.quantity > 0;
+    const row = document.createElement('div');
+    row.className = 'ov-row';
+    row.innerHTML = `<span class="qty ${has ? 'ok' : 'no'}">${st?.quantity == null ? '확인불가' : has ? st.quantity + '개' : '재고없음'}</span><span class="ov-main"><span class="pname">${esc(p.name)}</span><span class="loc"></span></span>`;
+    row.onclick = () => { $('store').value = s.storeName; selectProduct(p); };
+    if (has) fillLocation(p.id, s.storeCode, row.querySelector('.loc'), () => seq === renderSeq);
+    block.appendChild(row);
   }
-  await Promise.all(jobs);
-  if (seq === renderSeq) $('invStatus').textContent = `매장 ${storeList.length}곳 · 상품 ${favProducts.length}개`;
+  $('stores').appendChild(block);
 }
 
 function floor(n) {
@@ -610,8 +667,8 @@ const setResultsFolded = setupFold('resultsToggle', 'resultsBody', 'daiso-result
 setupFold('favToggle', 'favProducts', 'daiso-fav-folded');
 $('storeForm').onsubmit = (e) => {
   e.preventDefault();
-  if (state.product) showProductInventory();
-  else $('invStatus').textContent = '왼쪽에서 상품을 먼저 선택하세요.';
+  // 상품을 선택하지 않았으면 즐겨찾기 상품 기준으로 입력한 지역(비우면 내 주변)을 조회
+  state.product ? showProductInventory() : showOverview();
 };
 
 renderCats();
